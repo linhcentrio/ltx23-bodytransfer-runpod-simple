@@ -155,17 +155,36 @@ def clear_memory(unload_cache: bool = False) -> None:
 
 
 def prepare_comfy_imports() -> None:
+    # ComfyUI custom nodes import `utils.install_util`. Some base images or
+    # dependencies also provide a top-level `utils.py`, so Python can resolve
+    # `utils` to that module before it sees `/ComfyUI/utils`, producing:
+    #   No module named 'utils.install_util'; 'utils' is not a package
+    # Install a small compatibility package early and evict any stale module.
     if str(COMFY_ROOT) not in sys.path:
         sys.path.insert(0, str(COMFY_ROOT))
+
     utils_path = COMFY_ROOT / 'utils'
     utils_path.mkdir(parents=True, exist_ok=True)
-    (utils_path / '__init__.py').write_text('# generated\n', encoding='utf-8')
+    (utils_path / '__init__.py').write_text('# generated RunPod compatibility package\n', encoding='utf-8')
     (utils_path / 'install_util.py').write_text(
+        'from pathlib import Path\n\n'
         'def get_missing_requirements_message(packages):\n    return ""\n\n'
         'def get_required_packages_versions(requirements=None):\n    return {}\n\n'
-        f'def requirements_path():\n    return "{COMFY_ROOT / "requirements.txt"}"\n',
+        f'def requirements_path():\n    return str(Path(r"{COMFY_ROOT / "requirements.txt"}"))\n',
         encoding='utf-8',
     )
+
+    stale_utils = sys.modules.get('utils')
+    if stale_utils is not None and not hasattr(stale_utils, '__path__'):
+        logger.warning('Removing non-package utils module before ComfyUI imports: %r', stale_utils)
+        del sys.modules['utils']
+
+    import importlib
+    importlib.invalidate_caches()
+    try:
+        import utils.install_util  # noqa: F401
+    except Exception as exc:
+        raise RuntimeError(f'Failed to prepare ComfyUI utils.install_util shim at {utils_path}: {exc}') from exc
 
 
 def import_custom_nodes() -> None:

@@ -82,6 +82,15 @@ RUN aria2c --console-log-level=error -c -x 16 -s 16 -k 1M -d /ComfyUI/models/une
     aria2c --console-log-level=error -c -x 16 -s 16 -k 1M -d /ComfyUI/models/checkpoints/SDPose -o sdpose_wholebody_fp16.safetensors https://huggingface.co/Comfy-Org/SDPose/resolve/main/checkpoints/sdpose_wholebody_fp16.safetensors
 
 COPY handler.py /workspace/handler.py
-RUN chmod +x /workspace/handler.py && mkdir -p /workspace/input /workspace/output /workspace/tmp
+RUN chmod +x /workspace/handler.py && mkdir -p /workspace/input /workspace/output /workspace/tmp && \
+    python - <<'PY'
+import importlib.util
+spec = importlib.util.spec_from_file_location("handler", "/workspace/handler.py")
+handler = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(handler)
+handler.prepare_comfy_imports()
+import utils.install_util
+print("utils.install_util shim OK")
+PY
 
 CMD ["python", "-u", "/workspace/handler.py"]
