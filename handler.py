@@ -97,6 +97,8 @@ os.environ.setdefault('TORCH_COMPILE_DISABLE', '1')
 os.environ.setdefault('TORCHINDUCTOR_DISABLE', '1')
 os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
 os.environ.setdefault('CUDA_MODULE_LOADING', 'LAZY')
+# Prefer CUDA/NVRTC libraries copied into /usr/local/lib by Dockerfile.
+os.environ['LD_LIBRARY_PATH'] = '/usr/local/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
 try:
     import torch._dynamo
     torch._dynamo.config.suppress_errors = True

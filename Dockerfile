@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir \
+      nvidia-cuda-nvrtc-cu12 \
       runpod \
       requests \
       websocket-client \
@@ -82,7 +83,25 @@ RUN aria2c --console-log-level=error -c -x 16 -s 16 -k 1M -d /ComfyUI/models/une
     aria2c --console-log-level=error -c -x 16 -s 16 -k 1M -d /ComfyUI/models/checkpoints/SDPose -o sdpose_wholebody_fp16.safetensors https://huggingface.co/Comfy-Org/SDPose/resolve/main/checkpoints/sdpose_wholebody_fp16.safetensors
 
 COPY handler.py /workspace/handler.py
-RUN chmod +x /workspace/handler.py && mkdir -p /workspace/input /workspace/output /workspace/tmp && \
+RUN set -eux; \
+    NVRTC_DIR=$(python - <<'PY'
+import pathlib, nvidia.cuda_nvrtc
+print(pathlib.Path(nvidia.cuda_nvrtc.__file__).resolve().parent / 'lib')
+PY
+); \
+    echo "NVRTC_DIR=$NVRTC_DIR"; \
+    find /usr/local/cuda /usr/lib /usr/local/lib /opt/conda /usr/local/lib/python* -name 'libnvrtc-builtins.so*' -o -name 'libnvrtc.so*' 2>/dev/null || true; \
+    if [ -d "$NVRTC_DIR" ]; then \
+      cp -av "$NVRTC_DIR"/libnvrtc* /usr/local/lib/ || true; \
+    fi; \
+    BUILTIN=$(find /usr/local/lib /usr/local/cuda /usr/lib /opt/conda -name 'libnvrtc-builtins.so*' 2>/dev/null | sort -V | tail -1 || true); \
+    if [ -n "$BUILTIN" ]; then \
+      ln -sf "$BUILTIN" /usr/local/lib/libnvrtc-builtins.so.13.0; \
+      ln -sf "$BUILTIN" /usr/local/lib/libnvrtc-builtins.so; \
+    fi; \
+    echo /usr/local/lib > /etc/ld.so.conf.d/runpod-nvrtc.conf; \
+    ldconfig; \
+    chmod +x /workspace/handler.py && mkdir -p /workspace/input /workspace/output /workspace/tmp && \
     python - <<'PY'
 import importlib.util
 spec = importlib.util.spec_from_file_location("handler", "/workspace/handler.py")
