@@ -4,6 +4,14 @@ import json
 import logging
 import math
 import os
+# CUDA/NVRTC paths must be set before importing torch. PyTorch loads CUDA libs
+# once at import time, so changing LD_LIBRARY_PATH later is too late.
+os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True,max_split_size_mb:128')
+os.environ.setdefault('TORCH_COMPILE_DISABLE', '1')
+os.environ.setdefault('TORCHINDUCTOR_DISABLE', '1')
+os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
+os.environ.setdefault('CUDA_MODULE_LOADING', 'LAZY')
+os.environ['LD_LIBRARY_PATH'] = '/usr/local/lib:/usr/local/cuda/lib64:' + os.environ.get('LD_LIBRARY_PATH', '')
 import random
 import shutil
 import subprocess
@@ -89,16 +97,7 @@ for path in (INPUT_DIR, OUTPUT_DIR, WORKSPACE_DIR / 'tmp'):
     path.mkdir(parents=True, exist_ok=True)
 
 os.environ['AUX_ANNOTATOR_CKPTS_PATH'] = str(AUX_ANNOTATOR_DIR)
-os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True,max_split_size_mb:128')
-# RunPod CUDA images may not ship the NVRTC builtins version expected by
-# Torch/Inductor generated kernels. Prefer eager execution over failing late
-# with: nvrtc: failed to open libnvrtc-builtins.so.13.0.
-os.environ.setdefault('TORCH_COMPILE_DISABLE', '1')
-os.environ.setdefault('TORCHINDUCTOR_DISABLE', '1')
-os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
-os.environ.setdefault('CUDA_MODULE_LOADING', 'LAZY')
-# Prefer CUDA/NVRTC libraries copied into /usr/local/lib by Dockerfile.
-os.environ['LD_LIBRARY_PATH'] = '/usr/local/lib:' + os.environ.get('LD_LIBRARY_PATH', '')
+# CUDA/NVRTC and torch compile env is configured before importing torch.
 try:
     import torch._dynamo
     torch._dynamo.config.suppress_errors = True
