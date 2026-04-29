@@ -150,7 +150,15 @@ def call_node(node: Any, **kwargs: Any) -> Any:
     fn_name = getattr(node, 'FUNCTION', None)
     if not fn_name:
         raise RuntimeError(f'{type(node).__name__} has no FUNCTION attribute')
-    return getattr(node, fn_name)(**kwargs)
+    fn = getattr(node, fn_name)
+    try:
+        import inspect
+        sig = inspect.signature(fn)
+        if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    except Exception:
+        pass
+    return fn(**kwargs)
 
 
 def clear_memory(unload_cache: bool = False) -> None:
@@ -214,26 +222,11 @@ def run_coro_sync(coro):
     """Run an async ComfyUI initializer from RunPod's possibly-active loop."""
     try:
         asyncio.get_running_loop()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(asyncio.run, coro).result()
     except RuntimeError:
         return asyncio.run(coro)
-
-    # RunPod invokes sync handlers inside an active event loop in some workers.
-    # A helper thread gives the coroutine a clean loop and avoids nested-loop errors.
-    import threading
-    result = {}
-
-    def runner():
-        try:
-            result['value'] = asyncio.run(coro)
-        except BaseException as exc:
-            result['error'] = exc
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join()
-    if 'error' in result:
-        raise result['error']
-    return result.get('value')
 
 def import_custom_nodes() -> None:
     global NODE_CLASS_MAPPINGS
@@ -249,17 +242,42 @@ def import_custom_nodes() -> None:
     folder_paths.set_input_directory(str(INPUT_DIR))
     folder_paths.set_output_directory(str(OUTPUT_DIR))
 
+    class _MockRoutes:
+        def get(self, *args, **kwargs):
+            return lambda fn: fn
+        def post(self, *args, **kwargs):
+            return lambda fn: fn
+        def put(self, *args, **kwargs):
+            return lambda fn: fn
+        def delete(self, *args, **kwargs):
+            return lambda fn: fn
+        def static(self, *args, **kwargs):
+            return None
+
     class DummyPromptServer:
         instance = None
         def __init__(self):
             DummyPromptServer.instance = self
-            self.routes = None
+            self.routes = _MockRoutes()
             self.client_id = 'runpod-headless'
+            self.last_node_id = 'runpod-headless'
+            self.prompt_queue = None
+            self.supports = []
+            self.address = '127.0.0.1'
+            self.port = 8188
+            self.node_replace_manager = type('MockNodeReplaceManager', (), {
+                'register': lambda self, *a, **k: None,
+                'register_node_replace': lambda self, *a, **k: None,
+                'get_original_node': lambda self, *a, **k: None,
+                'unregister': lambda self, *a, **k: None,
+            })()
         def send_sync(self, *args, **kwargs):
+            return None
+        def add_routes(self, *args, **kwargs):
             return None
 
     server.PromptServer = DummyPromptServer
-    DummyPromptServer()
+    server.PromptServer.instance = DummyPromptServer()
 
     # Current ComfyUI exposes async node initializers. Calling them without
     # awaiting silently leaves custom nodes unloaded, so only core nodes appear.
