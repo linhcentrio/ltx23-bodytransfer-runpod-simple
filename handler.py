@@ -90,6 +90,19 @@ for path in (INPUT_DIR, OUTPUT_DIR, WORKSPACE_DIR / 'tmp'):
 
 os.environ['AUX_ANNOTATOR_CKPTS_PATH'] = str(AUX_ANNOTATOR_DIR)
 os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True,max_split_size_mb:128')
+# RunPod CUDA images may not ship the NVRTC builtins version expected by
+# Torch/Inductor generated kernels. Prefer eager execution over failing late
+# with: nvrtc: failed to open libnvrtc-builtins.so.13.0.
+os.environ.setdefault('TORCH_COMPILE_DISABLE', '1')
+os.environ.setdefault('TORCHINDUCTOR_DISABLE', '1')
+os.environ.setdefault('TORCHDYNAMO_DISABLE', '1')
+os.environ.setdefault('CUDA_MODULE_LOADING', 'LAZY')
+try:
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+    torch._dynamo.disable()
+except Exception:
+    pass
 
 
 def download_file(url: str, output_path: Path, timeout: int = 600) -> Path:
