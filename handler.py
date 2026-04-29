@@ -209,6 +209,32 @@ def prepare_comfy_imports() -> None:
         raise RuntimeError(f'Failed to prepare ComfyUI utils.install_util shim at {utils_path}: {exc}') from exc
 
 
+
+def run_coro_sync(coro):
+    """Run an async ComfyUI initializer from RunPod's possibly-active loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # RunPod invokes sync handlers inside an active event loop in some workers.
+    # A helper thread gives the coroutine a clean loop and avoids nested-loop errors.
+    import threading
+    result = {}
+
+    def runner():
+        try:
+            result['value'] = asyncio.run(coro)
+        except BaseException as exc:
+            result['error'] = exc
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join()
+    if 'error' in result:
+        raise result['error']
+    return result.get('value')
+
 def import_custom_nodes() -> None:
     global NODE_CLASS_MAPPINGS
     import execution  # noqa
@@ -237,8 +263,8 @@ def import_custom_nodes() -> None:
 
     # Current ComfyUI exposes async node initializers. Calling them without
     # awaiting silently leaves custom nodes unloaded, so only core nodes appear.
-    asyncio.run(init_builtin_extra_nodes())
-    asyncio.run(init_external_custom_nodes())
+    run_coro_sync(init_builtin_extra_nodes())
+    run_coro_sync(init_external_custom_nodes())
     NODE_CLASS_MAPPINGS = NCM
     logger.info(
         'Loaded ComfyUI nodes=%s; custom/video nodes=%s',
