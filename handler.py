@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 from urllib.parse import quote
 
 import requests
@@ -136,6 +136,14 @@ def get_value(obj: Any, index: int = 0) -> Any:
     except Exception:
         return obj['result'][index]
 
+
+
+def require_node(*names: str) -> Tuple[str, Any]:
+    for name in names:
+        if name in NODE_CLASS_MAPPINGS:
+            return name, NODE_CLASS_MAPPINGS[name]
+    available = ', '.join(sorted(k for k in NODE_CLASS_MAPPINGS if any(token in k.lower() for token in ('vhs', 'video', 'load'))))
+    raise KeyError(f"Missing required ComfyUI node. Tried {names}. Related available nodes: {available}")
 
 def call_node(node: Any, **kwargs: Any) -> Any:
     fn_name = getattr(node, 'FUNCTION', None)
@@ -418,7 +426,9 @@ def run_body_transfer(source_video_path: Path, control_video_path: Path, prompt:
         use_nag = default_use_nag
 
     with torch.inference_mode():
-        vloader = NODE_CLASS_MAPPINGS['VHS_LoadVideoFFmpeg']()
+        vloader_name, vloader_cls = require_node('VHS_LoadVideoFFmpeg', 'VHS_LoadVideo', 'LoadVideo')
+        logger.info('Using video loader node: %s', vloader_name)
+        vloader = vloader_cls()
         src = call_node(vloader, video=src_name, force_rate=float(target_fps), custom_width=0, custom_height=0, frame_load_cap=int(max_frames), start_time=0, format='LTXV')
         ctrl = call_node(vloader, video=ctrl_name, force_rate=float(target_fps), custom_width=0, custom_height=0, frame_load_cap=int(max_frames), start_time=0, format='LTXV')
         src_frames_all = get_value(src, 0)
