@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import json
 import logging
@@ -211,8 +212,16 @@ def prepare_comfy_imports() -> None:
 def import_custom_nodes() -> None:
     global NODE_CLASS_MAPPINGS
     import execution  # noqa
+    import folder_paths  # noqa
     import server  # noqa
     from nodes import init_builtin_extra_nodes, init_external_custom_nodes, NODE_CLASS_MAPPINGS as NCM
+
+    custom_nodes_dir = str(COMFY_ROOT / 'custom_nodes')
+    existing_custom_paths = [str(Path(p).resolve()) for p in folder_paths.get_folder_paths('custom_nodes')]
+    if str(Path(custom_nodes_dir).resolve()) not in existing_custom_paths:
+        folder_paths.add_model_folder_path('custom_nodes', custom_nodes_dir)
+    folder_paths.set_input_directory(str(INPUT_DIR))
+    folder_paths.set_output_directory(str(OUTPUT_DIR))
 
     class DummyPromptServer:
         instance = None
@@ -225,9 +234,17 @@ def import_custom_nodes() -> None:
 
     server.PromptServer = DummyPromptServer
     DummyPromptServer()
-    init_builtin_extra_nodes()
-    init_external_custom_nodes()
+
+    # Current ComfyUI exposes async node initializers. Calling them without
+    # awaiting silently leaves custom nodes unloaded, so only core nodes appear.
+    asyncio.run(init_builtin_extra_nodes())
+    asyncio.run(init_external_custom_nodes())
     NODE_CLASS_MAPPINGS = NCM
+    logger.info(
+        'Loaded ComfyUI nodes=%s; custom/video nodes=%s',
+        len(NODE_CLASS_MAPPINGS),
+        sorted(k for k in NODE_CLASS_MAPPINGS if any(token in k.lower() for token in ('vhs', 'video', 'ltx', 'gguf', 'kj')))[:80],
+    )
 
 
 def bootstrap_environment() -> None:
