@@ -174,12 +174,25 @@ def prepare_comfy_imports() -> None:
         encoding='utf-8',
     )
 
-    stale_utils = sys.modules.get('utils')
-    if stale_utils is not None and not hasattr(stale_utils, '__path__'):
-        logger.warning('Removing non-package utils module before ComfyUI imports: %r', stale_utils)
-        del sys.modules['utils']
-
     import importlib
+    import importlib.util
+    import types
+
+    # Force `utils` to be a package backed by /ComfyUI/utils even if another
+    # dependency imported a plain top-level utils module first.
+    pkg = types.ModuleType('utils')
+    pkg.__file__ = str(utils_path / '__init__.py')
+    pkg.__path__ = [str(utils_path)]
+    pkg.__package__ = 'utils'
+    sys.modules['utils'] = pkg
+
+    install_spec = importlib.util.spec_from_file_location('utils.install_util', utils_path / 'install_util.py')
+    if install_spec is None or install_spec.loader is None:
+        raise RuntimeError(f'Could not create import spec for {utils_path / "install_util.py"}')
+    install_module = importlib.util.module_from_spec(install_spec)
+    sys.modules['utils.install_util'] = install_module
+    install_spec.loader.exec_module(install_module)
+
     importlib.invalidate_caches()
     try:
         import utils.install_util  # noqa: F401
